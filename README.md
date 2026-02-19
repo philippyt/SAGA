@@ -1,1 +1,1 @@
-# SAGA - subsea autonomous guidance agent
+# SAGA - subsea
