@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const API_URL = "http://localhost:8000";
-const APP_NAME = "Subsea Inspector";
+const APP_NAME = "SAGA";
 
 function ImageGallery({ images, theme }) {
   const [selected, setSelected] = useState(null);
@@ -41,7 +41,7 @@ function ImageGallery({ images, theme }) {
             <img src={`${API_URL}/images/${selected.path}`} alt={selected.label}
               style={{ maxWidth: "100%", maxHeight: "85vh", borderRadius: 8 }} />
             <div style={{ color: "#fff", fontSize: 13, marginTop: 8, textAlign: "center" }}>
-              {selected.label} — relevance: {selected.score}
+              {selected.label} - relevance: {selected.score}
             </div>
           </div>
         </div>
@@ -53,7 +53,6 @@ function ImageGallery({ images, theme }) {
 function Message({ role, content, sources, images, theme }) {
   const isUser = role === "user";
   const [copied, setCopied] = useState(false);
-
   const copyText = () => {
     navigator.clipboard.writeText(content);
     setCopied(true);
@@ -68,7 +67,7 @@ function Message({ role, content, sources, images, theme }) {
             width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
             background: theme.accent, display: "flex", alignItems: "center", justifyContent: "center",
             fontSize: 14,
-          }}>⚓</div>
+          }} />
         )}
         {isUser && <div style={{ width: 28, flexShrink: 0 }} />}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -148,13 +147,10 @@ export default function MainFront() {
     if (inputRef.current) inputRef.current.style.height = "auto";
     setLoading(true);
     setStreaming(false);
-
     setMessages(prev => [...prev, { role: "user", content: text }]);
     setMessages(prev => [...prev, { role: "assistant", content: "", sources: [], images: [] }]);
-
     const controller = new AbortController();
     abortRef.current = controller;
-
     try {
       const res = await fetch(`${API_URL}/chat/stream`, {
         method: "POST",
@@ -166,14 +162,12 @@ export default function MainFront() {
       const decoder = new TextDecoder();
       let buffer = "";
       setStreaming(true);
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
-
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           try {
@@ -229,7 +223,6 @@ export default function MainFront() {
   ];
 
   const font = '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-
   const t = {
     bg: "#0f1419", border: "#2a3038", card: "#1a2028", text: "#d1d5db",
     textMuted: "#8899a6", textSubtle: "#556677", accent: "#1d9bf0",
@@ -297,7 +290,6 @@ export default function MainFront() {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 5v14M5 12h14"/></svg>
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 18 }}>⚓</span>
           <span style={{ fontSize: 15, fontWeight: 600, color: t.text }}>{APP_NAME}</span>
         </div>
         <div style={{ width: 30 }} />
@@ -310,9 +302,8 @@ export default function MainFront() {
             alignItems: "center", justifyContent: "center",
             height: "100%", gap: 16,
           }}>
-            <span style={{ fontSize: 48 }}>⚓</span>
             <div style={{ textAlign: "center" }}>
-              <p style={{ fontSize: 18, fontWeight: 600, color: t.text }}>Subsea Inspection Assistant</p>
+              <p style={{ fontSize: 18, fontWeight: 600, color: t.text }}>SAGA</p>
               <p style={{ fontSize: 13, color: t.textMuted, marginTop: 4 }}>
                 Query inspection reports and search ROV imagery
               </p>
@@ -343,7 +334,6 @@ export default function MainFront() {
         {loading && !streaming && (
           <div style={{ maxWidth: 800, margin: "0 auto", padding: "20px 24px" }}>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <span style={{ fontSize: 14 }}>⚓</span>
               <span className="loading-dots" style={{ fontSize: 15, color: t.textMuted }}>Searching reports and imagery</span>
             </div>
           </div>
@@ -396,7 +386,7 @@ export default function MainFront() {
 
       <div style={{ padding: "6px 24px 14px", textAlign: "center", background: t.bg }}>
         <p style={{ fontSize: 11, color: t.textSubtle }}>
-          May contain inaccuracies.
+          Responses may contain inaccuracies.
         </p>
       </div>
     </div>
