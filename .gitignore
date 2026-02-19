@@ -6,3 +6,4 @@ __pycache__
 server/data
 server/chroma_db
 server/clip_index.pkl
+server/logs.db
