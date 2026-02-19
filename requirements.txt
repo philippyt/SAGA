@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+langchain
+langchain-anthropic
+langchain-community
+langchain-chroma
+langchain-huggingface
+langchain-text-splitters
+pypdf
+chromadb
+sentence-transformers
+transformers
+torch
+Pillow
+numpy
