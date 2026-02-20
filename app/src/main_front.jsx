@@ -14,7 +14,7 @@ const themes = {
     sourceBg: "#0c2438", sourceText: "#38bdf8",
     userName: "#0ea5e9", botName: "#f59e0b",
     btnBg: "#0ea5e9", btnDisabled: "#1e2a34",
-    menuBg: "#151d26",
+    menuBg: "#151d26", expandBg: "#111920",
   },
   light: {
     bg: "#f5f7fa", border: "#dde3ea",
@@ -24,55 +24,101 @@ const themes = {
     sourceBg: "#e0f2fe", sourceText: "#0369a1",
     userName: "#0284c7", botName: "#b45309",
     btnBg: "#0284c7", btnDisabled: "#e2e8f0",
-    menuBg: "#ffffff",
+    menuBg: "#ffffff", expandBg: "#eef2f6",
   },
 };
 
-function ImageGallery({ images, theme, compact }) {
-  const [selected, setSelected] = useState(null);
+/* ── Google-Images-style gallery with inline expand ── */
+function ImageGallery({ images, theme }) {
+  const [expandedIdx, setExpandedIdx] = useState(null);
   if (!images || images.length === 0) return null;
+
+  const toggle = (i) => setExpandedIdx(prev => prev === i ? null : i);
+  const selected = expandedIdx !== null ? images[expandedIdx] : null;
+
   return (
-    <>
+    <div style={{ marginTop: 12 }}>
+      {/* Masonry-ish grid */}
       <div style={{
-        marginTop: 12, display: "grid", gap: 8,
-        gridTemplateColumns: `repeat(auto-fill, minmax(${compact ? 180 : 140}px, 1fr))`,
+        display: "flex", flexWrap: "wrap", gap: 6,
       }}>
-        {images.map((img, i) => (
-          <div key={i} onClick={() => setSelected(img)} style={{
-            cursor: "pointer", borderRadius: 8, overflow: "hidden",
-            border: `1px solid ${theme.border}`, position: "relative",
-            transition: "border-color 0.2s, transform 0.15s",
-          }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = theme.accent; e.currentTarget.style.transform = "scale(1.02)"; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.transform = "scale(1)"; }}
-          >
-            <img src={`${API_URL}/images/${img.path}`} alt={img.label}
-              style={{ width: "100%", height: compact ? 140 : 100, objectFit: "cover", display: "block" }}
-              onError={e => e.target.style.display = "none"} />
-            <div style={{
-              position: "absolute", bottom: 0, left: 0, right: 0,
-              background: "linear-gradient(transparent, rgba(0,0,0,0.8))",
-              padding: "12px 8px 5px", fontSize: 10, color: "#ccc",
-            }}>{img.label}</div>
-          </div>
-        ))}
+        {images.map((img, i) => {
+          const isActive = expandedIdx === i;
+          return (
+            <div key={i} onClick={() => toggle(i)} style={{
+              width: 130, cursor: "pointer", borderRadius: 8, overflow: "hidden",
+              border: `2px solid ${isActive ? theme.accent : "transparent"}`,
+              transition: "border-color 0.2s, transform 0.15s",
+              flexShrink: 0,
+            }}
+              onMouseEnter={e => { if (!isActive) e.currentTarget.style.transform = "scale(1.03)"; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; }}
+            >
+              <img
+                src={`${API_URL}/images/${img.path}`} alt={img.label}
+                style={{ width: "100%", height: 90, objectFit: "cover", display: "block" }}
+                onError={e => e.target.style.display = "none"}
+              />
+              <div style={{
+                padding: "4px 6px", fontSize: 10, color: theme.textMuted,
+                background: theme.codeBg, display: "flex", justifyContent: "space-between",
+              }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 85 }}>
+                  {img.label}
+                </span>
+                <span style={{ color: theme.accent, fontWeight: 600, flexShrink: 0 }}>{img.score}%</span>
+              </div>
+            </div>
+          );
+        })}
       </div>
+
+      {/* Expanded panel — inline below grid like Google Images */}
       {selected && (
-        <div onClick={() => setSelected(null)} style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.9)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          zIndex: 1000, cursor: "pointer", backdropFilter: "blur(8px)",
+        <div style={{
+          marginTop: 8, padding: 16, borderRadius: 10,
+          background: theme.expandBg, border: `1px solid ${theme.border}`,
+          display: "flex", gap: 16, alignItems: "flex-start",
+          position: "relative",
         }}>
-          <div style={{ maxWidth: "90vw", maxHeight: "90vh" }}>
-            <img src={`${API_URL}/images/${selected.path}`} alt={selected.label}
-              style={{ maxWidth: "100%", maxHeight: "85vh", borderRadius: 8 }} />
-            <div style={{ color: "#fff", fontSize: 13, marginTop: 8, textAlign: "center", opacity: 0.7 }}>
+          <button onClick={() => setExpandedIdx(null)} style={{
+            position: "absolute", top: 8, right: 12,
+            background: "none", border: "none", color: theme.textMuted,
+            fontSize: 20, cursor: "pointer", lineHeight: 1,
+          }}>×</button>
+          <img
+            src={`${API_URL}/images/${selected.path}`} alt={selected.label}
+            style={{ maxWidth: 400, maxHeight: 300, borderRadius: 8, objectFit: "contain" }}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: theme.text, marginBottom: 6 }}>
               {selected.label}
+            </div>
+            <div style={{ fontSize: 13, color: theme.textMuted, lineHeight: 1.6 }}>
+              <div>Relevance: <span style={{ color: theme.accent, fontWeight: 600 }}>{selected.score}%</span></div>
+              <div style={{ marginTop: 4, fontSize: 11, color: theme.textSubtle }}>{selected.path}</div>
+              {selected.width > 0 && (
+                <div style={{ fontSize: 11, color: theme.textSubtle }}>{selected.width} × {selected.height} px</div>
+              )}
+            </div>
+            <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
+              {expandedIdx > 0 && (
+                <button onClick={(e) => { e.stopPropagation(); setExpandedIdx(expandedIdx - 1); }}
+                  style={{ padding: "4px 12px", borderRadius: 6, border: `1px solid ${theme.border}`, background: "transparent", color: theme.textMuted, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>
+                  ← Prev
+                </button>
+              )}
+              {expandedIdx < images.length - 1 && (
+                <button onClick={(e) => { e.stopPropagation(); setExpandedIdx(expandedIdx + 1); }}
+                  style={{ padding: "4px 12px", borderRadius: 6, border: `1px solid ${theme.border}`, background: "transparent", color: theme.textMuted, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>
+                  Next →
+                </button>
+              )}
             </div>
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -95,17 +141,14 @@ function FollowUpQuestions({ questions, theme, onAsk }) {
   );
 }
 
-function Message({ role, content, sources, images, related, theme, onAsk }) {
+function Message({ role, content, sources, images, related, theme, onAsk, showImages }) {
   const isUser = role === "user";
   const [copied, setCopied] = useState(false);
   const copyText = () => { navigator.clipboard.writeText(content); setCopied(true); setTimeout(() => setCopied(false), 1500); };
   return (
     <div style={{ maxWidth: 800, margin: "0 auto", padding: "0 24px" }}>
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "20px 0 4px" }}>
-        {!isUser && (
-          <div style={{ width: 28, flexShrink: 0 }} />
-        )}
-        {isUser && <div style={{ width: 28, flexShrink: 0 }} />}
+        <div style={{ width: 28, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
             fontSize: 12, fontWeight: 600, letterSpacing: "0.03em",
@@ -139,7 +182,7 @@ function Message({ role, content, sources, images, related, theme, onAsk }) {
               ))}
             </div>
           )}
-          {!isUser && <ImageGallery images={images} theme={theme} />}
+          {!isUser && showImages && <ImageGallery images={images} theme={theme} />}
           {!isUser && <FollowUpQuestions questions={related} theme={theme} onAsk={onAsk} />}
         </div>
       </div>
@@ -173,7 +216,6 @@ function DropdownMenu({ open, onClose, theme, onAction, imageMode }) {
               width: "100%", padding: "9px 16px", border: "none",
               background: "transparent", color: theme.text, fontSize: 13,
               fontFamily: "inherit", cursor: "pointer", textAlign: "left",
-              transition: "background 0.1s",
             }}
               onMouseEnter={e => e.currentTarget.style.background = theme.accentDim}
               onMouseLeave={e => e.currentTarget.style.background = "transparent"}
@@ -196,6 +238,7 @@ export default function MainFront() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [mode, setMode] = useState("chat");
   const [darkMode, setDarkMode] = useState(true);
+  const [showImages, setShowImages] = useState(false);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const abortRef = useRef(null);
@@ -227,12 +270,14 @@ export default function MainFront() {
       try {
         const res = await fetch(`${API_URL}/search/images`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: text, k: 8 }),
+          body: JSON.stringify({ query: text, k: 20 }),
         });
         const data = await res.json();
+        const imgs = data.images || [];
         setMessages(prev => [...prev, {
-          role: "assistant", content: `Found ${data.images?.length || 0} relevant images:`,
-          sources: [], images: data.images || [], related: [],
+          role: "assistant",
+          content: imgs.length > 0 ? `${imgs.length} results for "${text}"` : `No relevant images found for "${text}"`,
+          sources: [], images: imgs, related: [],
         }]);
       } catch {
         setMessages(prev => [...prev, { role: "assistant", content: "Could not connect to backend.", sources: [], images: [], related: [] }]);
@@ -274,7 +319,7 @@ export default function MainFront() {
   const handleKeyDown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
 
   const suggestions = mode === "image"
-    ? ["subsea pipeline corrosion", "marine growth fouling", "anode depletion", "ROV inspection crack"]
+    ? ["subsea pipeline corrosion", "marine growth fouling", "anode depletion", "ROV inspection crack", "coating damage", "freespan pipeline"]
     : ["What are common subsea pipeline failure modes?", "Explain cathodic protection monitoring", "Show corrosion examples", "What is DNV-RP-F116?"];
 
   const font = '"Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -336,7 +381,7 @@ export default function MainFront() {
                 {mode === "image" ? "Search ROV imagery and inspection photos" : "Query inspection reports, standards, and ROV imagery"}
               </p>
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", maxWidth: 520 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", maxWidth: 560 }}>
               {suggestions.map((q, i) => (
                 <button key={i} onClick={() => { setInput(q); inputRef.current?.focus(); }} style={{
                   padding: "8px 16px", borderRadius: 20, border: `1px solid ${t.border}`,
@@ -352,7 +397,7 @@ export default function MainFront() {
         )}
         {messages.map((m, i) => (
           <div key={i}>
-            <Message role={m.role} content={m.content} sources={m.sources} images={m.images} related={m.related} theme={t} onAsk={q => send(q)} />
+            <Message role={m.role} content={m.content} sources={m.sources} images={m.images} related={m.related} theme={t} onAsk={q => send(q)} showImages={mode === "image" || showImages} />
             {i < messages.length - 1 && <div style={{ maxWidth: 800, margin: "0 auto", padding: "0 24px" }}><div style={{ borderBottom: `1px solid ${t.border}` }} /></div>}
           </div>
         ))}
@@ -370,7 +415,18 @@ export default function MainFront() {
       {/* Input */}
       <div style={{ padding: "12px 24px", background: t.bg, transition: "background 0.3s" }}>
         <div style={{ maxWidth: 800, margin: "0 auto" }}>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 10, background: t.inputBg, border: `1px solid ${t.inputBorder}`, borderRadius: 24, padding: "6px 6px 6px 20px", transition: "border-color 0.2s" }}>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 10, background: t.inputBg, border: `1px solid ${t.inputBorder}`, borderRadius: 24, padding: "6px 6px 6px 12px", transition: "border-color 0.2s" }}>
+            {mode === "chat" && (
+              <button onClick={() => setShowImages(v => !v)} title={showImages ? "Hide images" : "Show images"} style={{
+                background: "none", border: "none", cursor: "pointer",
+                color: showImages ? t.accent : t.textSubtle, padding: "8px 4px",
+                display: "flex", alignItems: "center", flexShrink: 0, transition: "color 0.15s",
+              }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={showImages ? "2.2" : "1.5"} strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
+                </svg>
+              </button>
+            )}
             <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
               placeholder={mode === "image" ? "Describe what you're looking for..." : "Ask about subsea inspections..."} rows={1}
               style={{ flex: 1, resize: "none", border: "none", background: "transparent", color: t.text, fontSize: 15, fontFamily: font, padding: "8px 0", lineHeight: 1.5, minHeight: 24, maxHeight: 120 }}

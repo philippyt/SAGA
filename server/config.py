@@ -8,8 +8,8 @@ if not _env_path.exists():
     _env_path = _server_dir.parent / ".env"
 load_dotenv(_env_path)
 
-REPORTS_DIR = os.environ.get("REPORTS_DIR", str(_server_dir.parent / "server" / "data" / "reports"))
-IMAGES_DIR = os.environ.get("IMAGES_DIR", str(_server_dir.parent / "server" / "data" / "images" / "corrosion"))
+REPORTS_DIR = os.environ.get("REPORTS_DIR", str(_server_dir / "data" / "reports"))
+IMAGES_DIR = os.environ.get("IMAGES_DIR", str(_server_dir / "data" / "images"))
 CHROMA_PERSIST_DIR = os.environ.get("CHROMA_DIR", str(_server_dir / "chroma_db"))
 CLIP_INDEX_PATH = os.environ.get("CLIP_INDEX_PATH", str(_server_dir / "clip_index.pkl"))
 CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", 1000))
@@ -19,8 +19,10 @@ CLIP_MODEL = os.environ.get("CLIP_MODEL", "openai/clip-vit-base-patch32")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", 0.3))
-TOP_K = int(os.environ.get("TOP_K", 3))
-TOP_K_IMAGES = int(os.environ.get("TOP_K_IMAGES", 4))
+TOP_K = int(os.environ.get("TOP_K", 5))
+TOP_K_IMAGES = int(os.environ.get("TOP_K_IMAGES", 16))
+RERANK_MODEL = os.environ.get("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+RERANK_TOP_K = int(os.environ.get("RERANK_TOP_K", 3))
 PROMPT_FILE = os.environ.get("PROMPT_FILE", str(_server_dir / "prompt.txt"))
 CACHE_ENABLED = os.environ.get("CACHE_ENABLED", "true").lower() == "true"
 CACHE_MAX_SIZE = int(os.environ.get("CACHE_MAX_SIZE", 200))
