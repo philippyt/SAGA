@@ -13,7 +13,6 @@ from pipeline import build_llm, load_system_prompt, retrieve, build_context_bloc
 from cache import SemanticCache
 from logger import log_interaction, get_stats
 from config import CACHE_ENABLED, STATIC_IMAGES_DIR
-
 _store = None
 _llm = None
 _system_prompt = ""
@@ -23,7 +22,6 @@ _chat_histories: dict[str, list] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _store, _llm, _system_prompt
-    print("Starting Subsea RAG...")
     _store = build_vectorstore()
     _llm = build_llm()
     _system_prompt = load_system_prompt()
@@ -31,7 +29,7 @@ async def lifespan(app: FastAPI):
     print("Ready")
     yield
 
-app = FastAPI(title="Subsea Inspection RAG", lifespan=lifespan)
+app = FastAPI(title="SAGA", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -59,6 +57,7 @@ def health():
         "cache_size": _cache.size,
     }
 
+
 @app.get("/stats")
 def stats():
     return get_stats()
@@ -77,7 +76,6 @@ async def chat_stream(req: ChatRequest, request: Request):
         return StreamingResponse(error_stream(), media_type="text/event-stream")
 
     start_time = time.time()
-
     if CACHE_ENABLED:
         cached = _cache.get(req.question)
         if cached:
@@ -93,11 +91,9 @@ async def chat_stream(req: ChatRequest, request: Request):
             return StreamingResponse(cached_stream(), media_type="text/event-stream")
 
     history = _chat_histories.setdefault(req.session_id, [])
-
     docs = retrieve(_store, req.question) if _store else []
     sources = [d["source_label"] for d in docs]
     context = build_context_block(docs)
-
     images = search_images(req.question)
     image_desc = ""
     if images:
@@ -107,7 +103,6 @@ async def chat_stream(req: ChatRequest, request: Request):
         image_desc = "\n".join(parts)
 
     msgs = build_messages(_system_prompt, history[-12:], req.question, context, image_desc)
-
     async def event_stream():
         full_answer = ""
         try:
@@ -136,7 +131,20 @@ async def chat_stream(req: ChatRequest, request: Request):
             cached=False, response_time_ms=elapsed,
         )
 
-        yield f"data: {json.dumps({'type': 'done', 'sources': sources[:5], 'images': images})}\n\n"
+        related = []
+        if full_answer and _llm:
+            try:
+                from langchain_core.messages import SystemMessage as S, HumanMessage as H
+                result = _llm.invoke([
+                    S(content="Generate 3 short follow-up questions an engineer might ask based on the answer below. Write only the questions, one per line, no numbering. Max 10 words each. Write in English."),
+                    H(content=f"Question: {req.question}\n\nAnswer: {full_answer[:300]}"),
+                ])
+                lines = [l.strip() for l in result.content.strip().split("\n") if l.strip()]
+                related = lines[:3]
+            except:
+                pass
+
+        yield f"data: {json.dumps({'type': 'done', 'sources': sources[:5], 'images': images, 'related': related})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
