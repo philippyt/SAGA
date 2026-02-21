@@ -4,7 +4,6 @@ import remarkGfm from "remark-gfm";
 
 const API = "http://localhost:8000";
 
-/* ── Professional theme: warm neutrals, subtle accents ── */
 const themes = {
   dark: {
     bg: "#141418", bgAlt: "#1a1a20", border: "#2a2a32",
@@ -33,13 +32,12 @@ const themes = {
 };
 
 const TOOL_META = {
-  search_reports: { icon: "📄", verb: "Searched reports" },
-  search_images: { icon: "🖼", verb: "Searched images" },
-  classify_defect: { icon: "🔬", verb: "Analyzed defect" },
-  check_standard: { icon: "📋", verb: "Checked standards" },
+  search_reports: { icon: "📄", verb: "Searching reports" },
+  search_images: { icon: "🖼", verb: "Searching images" },
+  classify_defect: { icon: "🔬", verb: "Analyzing defects" },
+  check_standard: { icon: "📋", verb: "Checking standards" },
 };
 
-/* ── Collapsible tool activity ── */
 function ToolSteps({ steps, theme }) {
   const [open, setOpen] = useState(false);
   if (!steps?.length) return null;
