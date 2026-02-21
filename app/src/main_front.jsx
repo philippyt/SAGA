@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 
 const API = "http://localhost:8000";
 
+/* ── Professional theme: warm neutrals, subtle accents ── */
 const themes = {
   dark: {
     bg: "#141418", bgAlt: "#1a1a20", border: "#2a2a32",
@@ -32,12 +33,13 @@ const themes = {
 };
 
 const TOOL_META = {
-  search_reports: { icon: "📄", verb: "Searching reports" },
-  search_images: { icon: "🖼", verb: "Searching images" },
-  classify_defect: { icon: "🔬", verb: "Analyzing defects" },
-  check_standard: { icon: "📋", verb: "Checking standards" },
+  search_reports: { icon: "📄", verb: "Searched reports" },
+  search_images: { icon: "🖼", verb: "Searched images" },
+  classify_defect: { icon: "🔬", verb: "Analyzed defect" },
+  check_standard: { icon: "📋", verb: "Checked standards" },
 };
 
+/* ── Collapsible tool activity ── */
 function ToolSteps({ steps, theme }) {
   const [open, setOpen] = useState(false);
   if (!steps?.length) return null;
@@ -157,8 +159,18 @@ function Message({ msg, theme, onAsk }) {
         <div style={{ fontSize: 16, lineHeight: 1.75, color: theme.text, wordBreak: "break-word" }}>
           {isUser ? <span style={{ whiteSpace: "pre-wrap" }}>{content?.replace(/\s*\(include relevant inspection images\)/g, "")}</span> : (
             <div className="md"><ReactMarkdown remarkPlugins={[remarkGfm]}>{
-              /* Strip [IMAGE: ...] tags from displayed text */
-              content?.replace(/\[IMAGE:\s*[^\]]+\]/g, "").trim()
+              /* Strip [IMAGE: ...] tags and clean orphaned punctuation */
+              content
+                ?.replace(/\[IMAGE:\s*[^\]]+\]/g, "")
+                .replace(/\s{2,}/g, " ")
+                .replace(/\s+([,.\;\:])/g, "$1")
+                .replace(/([,.\;\:])\s*\1+/g, "$1")
+                .replace(/\band\s*[,\.]/g, "and")
+                .replace(/[,\.]\s*and\b/g, " and")
+                .replace(/\(\s*\)/g, "")
+                .replace(/\s+\./g, ".")
+                .replace(/\s+,/g, ",")
+                .trim()
             }</ReactMarkdown></div>
           )}
         </div>
@@ -208,7 +220,6 @@ function Menu({ open, onClose, theme, onAction, imageMode }) {
   );
 }
 
-/* ── Live status ── */
 function StatusIndicator({ text, theme }) {
   return (
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "12px 20px" }}>
@@ -229,7 +240,7 @@ export default function App() {
   const [mode, setMode] = useState("chat");
   const [dark, setDark] = useState(true);
   const [status, setStatus] = useState(null);
-  const [wantImages, setWantImages] = useState(false); // "Planning..." / "Searching reports..." / "Synthesizing..."
+  const [wantImages, setWantImages] = useState(false);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const abortRef = useRef(null);
@@ -257,8 +268,6 @@ export default function App() {
     setInput("");
     if (inputRef.current) inputRef.current.style.height = "auto";
     setLoading(true); setStreaming(false);
-
-    // ── Image mode: pure CLIP search, no LLM ──
     if (mode === "image") {
       setStatus("Searching images...");
       setMsgs(prev => [...prev, { role: "user", content: text }]);
@@ -425,7 +434,7 @@ export default function App() {
               onInput={e => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
               onFocus={e => e.target.parentElement.style.borderColor = t.accent}
               onBlur={e => e.target.parentElement.style.borderColor = t.inputBorder} />
-            {/* Image toggle — when active, send includes image hint */}
+            {/* Image toggle when active, send includes image hint */}
             {mode === "chat" && (
               <button onClick={() => setWantImages(v => !v)} title={wantImages ? "Images enabled" : "Include images"} style={{
                 width: 34, height: 34, borderRadius: "50%", border: wantImages ? `2px solid ${t.accent}` : "2px solid transparent",

@@ -81,6 +81,7 @@ def classify_defect(image_path: str) -> str:
     exp_logits = np.exp(logits - logits.max())
     probs = exp_logits / exp_logits.sum()
     ranked = sorted(zip(defect_types, probs), key=lambda x: x[1], reverse=True)
+
     severity_labels = [
         "minor surface defect requiring monitoring only",
         "moderate defect requiring repair within 12 months",
@@ -141,10 +142,13 @@ TOOL CHAINING — chain tools for complex queries:
 3. "Show coating damage" → search_images → describe
 
 IMAGE SELECTION
-When search_images returns results, YOU choose which images are most relevant to include.
-In your response, reference selected images with [IMAGE: path/to/image.jpg] tags.
-Only include images that directly support your answer — do NOT dump all results.
-Pick 2-4 of the best matches and explain what each shows.
+When search_images returns results, choose 2-4 most relevant images.
+Place image references on their OWN LINE, never inline with text:
+
+Good: "External corrosion is visible on the pipeline surface.\n[IMAGE: corrosion/abc.jpg]"
+Bad: "External corrosion is visible [IMAGE: corrosion/abc.jpg] on the pipeline surface."
+
+Never put IMAGE tags next to commas, periods, or conjunctions.
 
 Keep responses concise (200-300 words). Reference sources. Be direct.
 """
@@ -271,7 +275,6 @@ def run_agent_turn(question: str, history: list[dict] = None, max_iterations: in
     except Exception as e:
         final_text = f"Error: {str(e)}"
         yield {"type": "token", "content": final_text}
-
     related = []
     try:
         result = _llm_streaming.invoke([
@@ -296,7 +299,6 @@ def run_agent_turn(question: str, history: list[dict] = None, max_iterations: in
         related = clean[:3]
     except:
         pass
-
     picked_paths = re.findall(r'\[IMAGE:\s*([^\]]+)\]', final_text)
     picked_images = []
     img_lookup = {img["path"]: img for img in collected_images}
@@ -309,7 +311,6 @@ def run_agent_turn(question: str, history: list[dict] = None, max_iterations: in
 
     if not picked_images and collected_images:
         picked_images = collected_images[:4]
-
     seen = set()
     unique_sources = [s for s in collected_sources if not (s in seen or seen.add(s))]
     seen_paths = set()
