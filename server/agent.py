@@ -21,6 +21,7 @@ _system_prompt = ""
 
 @tool
 def search_reports(query: str) -> str:
+    """Search inspection reports and technical documents for information about subsea pipelines, corrosion, standards, maintenance procedures, and inspection findings."""
     if _store is None:
         return "No report database available."
     docs = retrieve(_store, query, rerank=True)
@@ -30,9 +31,9 @@ def search_reports(query: str) -> str:
     sources = [d["source_label"] for d in docs]
     return f"Sources: {', '.join(sources)}\n\n{context}"
 
-
 @tool
 def search_images(query: str, num_results: int = 8) -> str:
+    """Search the inspection image database using CLIP visual similarity. Use when the user wants images, visual examples, or when visual evidence supports the answer."""
     results = clip_search(query, k=num_results)
     if not results:
         return "No relevant images found."
@@ -43,6 +44,7 @@ def search_images(query: str, num_results: int = 8) -> str:
 
 @tool
 def classify_defect(image_path: str) -> str:
+    """Classify the type and severity of a defect in an inspection image using CLIP zero-shot classification. Provide an image path from search_images results."""
     from clip_index import _load_clip
     from PIL import Image
     from config import IMAGES_DIR
@@ -79,7 +81,6 @@ def classify_defect(image_path: str) -> str:
     exp_logits = np.exp(logits - logits.max())
     probs = exp_logits / exp_logits.sum()
     ranked = sorted(zip(defect_types, probs), key=lambda x: x[1], reverse=True)
-
     severity_labels = [
         "minor surface defect requiring monitoring only",
         "moderate defect requiring repair within 12 months",
@@ -106,7 +107,6 @@ def classify_defect(image_path: str) -> str:
 @tool
 def check_standard(defect_type: str, standard: str = "DNV-RP-F116") -> str:
     """Look up acceptance criteria for a defect type according to industry standards. Use after classify_defect for actionable recommendations."""
-    from pipeline import retrieve, build_context_block
     if _store is None:
         return "No standards database available."
     query = f"{defect_type} acceptance criteria {standard} recommended action"
@@ -116,6 +116,7 @@ def check_standard(defect_type: str, standard: str = "DNV-RP-F116") -> str:
     context = build_context_block(docs)
     sources = [d["source_label"] for d in docs]
     return f"Standards reference ({', '.join(sources)}):\n\n{context}"
+
 
 ALL_TOOLS = [search_reports, search_images, classify_defect, check_standard]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
@@ -147,7 +148,6 @@ Pick 2-4 of the best matches and explain what each shows.
 
 Keep responses concise (200-300 words). Reference sources. Be direct.
 """
-
 
 def init_agent(store, llm_instance=None):
     global _store, _llm_with_tools, _llm_streaming, _system_prompt
@@ -192,7 +192,6 @@ def run_agent_turn(question: str, history: list[dict] = None, max_iterations: in
     tools_used = False
 
     yield {"type": "thinking", "content": "Planning approach..."}
-
     for iteration in range(max_iterations):
         response = _llm_with_tools.invoke(messages)
         messages.append(response)
@@ -213,7 +212,9 @@ def run_agent_turn(question: str, history: list[dict] = None, max_iterations: in
                 if "Sources:" in result:
                     src_line = result.split("\n")[0].replace("Sources: ", "")
                     collected_sources.extend([s.strip() for s in src_line.split(",")])
-                messages.append(HumanMessage(content=f"Here are relevant report sections:\n\n{result}\n\nNow answer the original question based on this information."))
+                messages.append(HumanMessage(
+                    content=f"Here are relevant report sections:\n\n{result}\n\nNow answer the original question based on this information."
+                ))
                 tools_used = True
                 continue
             else:
@@ -246,7 +247,6 @@ def run_agent_turn(question: str, history: list[dict] = None, max_iterations: in
                 src_line = result.split("\n")[0].replace("Sources: ", "")
                 collected_sources.extend([s.strip() for s in src_line.split(",")])
             elif tool_name == "search_images":
-                from clip_index import search_images as clip_search
                 imgs = clip_search(tool_args.get("query", question), k=tool_args.get("num_results", 8))
                 collected_images.extend(imgs)
 
@@ -255,7 +255,11 @@ def run_agent_turn(question: str, history: list[dict] = None, max_iterations: in
     yield {"type": "thinking", "content": "Synthesizing answer..."}
 
     if tools_used:
-        messages.append(HumanMessage(content="Based on the tool results above, provide a comprehensive answer to the user's question. If the data doesn't contain exact numbers requested, say what IS available and what further inspection would be needed. Never say 'I need to search' — you already searched."))
+        messages.append(HumanMessage(
+            content="Based on the tool results above, provide a comprehensive answer. "
+                    "If exact data isn't available, state what IS available and what further inspection is needed. "
+                    "Never say 'I need to search' - you already searched."
+        ))
 
     final_text = ""
     try:
@@ -265,14 +269,18 @@ def run_agent_turn(question: str, history: list[dict] = None, max_iterations: in
                 final_text += token
                 yield {"type": "token", "content": token}
     except Exception as e:
-        error_msg = f"Error generating response: {str(e)}"
-        final_text = error_msg
-        yield {"type": "token", "content": error_msg}
+        final_text = f"Error: {str(e)}"
+        yield {"type": "token", "content": final_text}
 
     related = []
     try:
         result = _llm_streaming.invoke([
-            SystemMessage(content="Output exactly 3 follow-up questions a subsea engineer might ask to learn more about this topic. Rules: one question per line, no numbering, no bullets, no headers, no markdown. Never use 'you' or 'your' — questions should be about the technical subject, not directed at the assistant. Max 10 words each. Example good questions: 'What corrosion rates are typical for carbon steel?' or 'How often should CP surveys be conducted?'"),
+            SystemMessage(content=(
+                "Output exactly 3 follow-up questions a subsea engineer might ask about this topic. "
+                "Rules: one per line, no numbering, no bullets, no headers, no markdown. "
+                "Never use 'you' or 'your' — questions must be about the technical subject. "
+                "Max 10 words each."
+            )),
             HumanMessage(content=f"Topic: {question}\nContext: {final_text[:300]}"),
         ])
         lines = [l.strip() for l in result.content.strip().split("\n") if l.strip()]
@@ -301,6 +309,7 @@ def run_agent_turn(question: str, history: list[dict] = None, max_iterations: in
 
     if not picked_images and collected_images:
         picked_images = collected_images[:4]
+
     seen = set()
     unique_sources = [s for s in collected_sources if not (s in seen or seen.add(s))]
     seen_paths = set()
