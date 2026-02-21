@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 python-dotenv
 langchain
+langchain-core
 langchain-anthropic
 langchain-community
 langchain-chroma
@@ -14,3 +15,4 @@ transformers
 torch
 Pillow
 numpy
+torchvision

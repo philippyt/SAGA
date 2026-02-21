@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from vectorstore import build_vectorstore
 from clip_index import load_clip_index, search_images, rebuild_clip_index
 from pipeline import build_llm, load_system_prompt, retrieve, build_context_block, build_messages
+from agent import init_agent, run_agent_turn
 from cache import SemanticCache
 from logger import log_interaction, get_stats
 from config import CACHE_ENABLED, STATIC_IMAGES_DIR
@@ -22,31 +23,33 @@ _chat_histories: dict[str, list] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _store, _llm, _system_prompt
+    print("Starting Subsea RAG Agent...")
     _store = build_vectorstore()
     _llm = build_llm()
     _system_prompt = load_system_prompt()
     load_clip_index()
-    print("Ready")
+    init_agent(_store, _llm)
+    print("Agent ready")
     yield
 
-app = FastAPI(title="SAGA", lifespan=lifespan)
+app = FastAPI(title="Subsea Inspection RAG Agent", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 if Path(STATIC_IMAGES_DIR).exists():
     app.mount("/images", StaticFiles(directory=STATIC_IMAGES_DIR), name="images")
 
 class ChatRequest(BaseModel):
     question: str
     session_id: str = "default"
+    use_agent: bool = True
 
 class ImageSearchRequest(BaseModel):
     query: str
-    k: int = 4
+    k: int = 16
 
 @app.get("/health")
 def health():
@@ -55,8 +58,8 @@ def health():
         "store_ready": _store is not None,
         "llm_ready": _llm is not None,
         "cache_size": _cache.size,
+        "agent": True,
     }
-
 
 @app.get("/stats")
 def stats():
@@ -71,8 +74,8 @@ async def search_images_endpoint(req: ImageSearchRequest):
 async def chat_stream(req: ChatRequest, request: Request):
     if _llm is None:
         async def error_stream():
-            yield f"data: {json.dumps({'type': 'token', 'content': 'Backend er ikke klar.'})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'sources': [], 'images': []})}\n\n"
+            yield f"data: {json.dumps({'type': 'token', 'content': 'Backend not ready.'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'sources': [], 'images': [], 'related': []})}\n\n"
         return StreamingResponse(error_stream(), media_type="text/event-stream")
 
     start_time = time.time()
@@ -87,66 +90,107 @@ async def chat_stream(req: ChatRequest, request: Request):
             )
             async def cached_stream():
                 yield f"data: {json.dumps({'type': 'token', 'content': cached['answer']})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'sources': cached['sources'], 'images': []})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'sources': cached['sources'], 'images': [], 'related': []})}\n\n"
             return StreamingResponse(cached_stream(), media_type="text/event-stream")
 
     history = _chat_histories.setdefault(req.session_id, [])
-    docs = retrieve(_store, req.question) if _store else []
-    sources = [d["source_label"] for d in docs]
-    context = build_context_block(docs)
-    images = search_images(req.question)
-    image_desc = ""
-    if images:
-        parts = []
-        for img in images:
-            parts.append(f"- {img['label']} (relevans: {img['score']}): {img['path']}")
-        image_desc = "\n".join(parts)
 
-    msgs = build_messages(_system_prompt, history[-12:], req.question, context, image_desc)
-    async def event_stream():
-        full_answer = ""
-        try:
-            for chunk in _llm.stream(msgs):
-                if await request.is_disconnected():
-                    break
-                token = chunk.content
-                if isinstance(token, str) and token:
-                    full_answer += token
-                    yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+    if req.use_agent:
+        async def agent_stream():
+            full_answer = ""
+            final_event = None
+            yield f"data: {json.dumps({'type': 'thinking', 'content': 'Planning...'})}\n\n"
 
-        if full_answer:
-            history.append({"role": "user", "content": req.question})
-            history.append({"role": "assistant", "content": full_answer})
-            if len(history) > 12:
-                _chat_histories[req.session_id] = history[-12:]
-            if CACHE_ENABLED:
-                _cache.put(req.question, full_answer, sources[:5])
-
-        elapsed = int((time.time() - start_time) * 1000)
-        log_interaction(
-            session_id=req.session_id, question=req.question,
-            answer=full_answer, sources=sources[:5],
-            cached=False, response_time_ms=elapsed,
-        )
-
-        related = []
-        if full_answer and _llm:
             try:
-                from langchain_core.messages import SystemMessage as S, HumanMessage as H
-                result = _llm.invoke([
-                    S(content="Generate 3 short follow-up questions an engineer might ask based on the answer below. Write only the questions, one per line, no numbering. Max 10 words each. Write in English."),
-                    H(content=f"Question: {req.question}\n\nAnswer: {full_answer[:300]}"),
-                ])
-                lines = [l.strip() for l in result.content.strip().split("\n") if l.strip()]
-                related = lines[:3]
-            except:
-                pass
+                for event in run_agent_turn(req.question, history):
+                    if await request.is_disconnected():
+                        break
 
-        yield f"data: {json.dumps({'type': 'done', 'sources': sources[:5], 'images': images, 'related': related})}\n\n"
+                    if event["type"] == "thinking":
+                        yield f"data: {json.dumps({'type': 'thinking', 'content': event['content']})}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+                    elif event["type"] == "tool_call":
+                        yield f"data: {json.dumps({'type': 'tool_call', 'name': event['name'], 'input': event['input']})}\n\n"
+
+                    elif event["type"] == "tool_result":
+                        yield f"data: {json.dumps({'type': 'tool_result', 'name': event['name'], 'preview': event['content'][:150]})}\n\n"
+
+                    elif event["type"] == "token":
+                        full_answer += event["content"]
+                        yield f"data: {json.dumps({'type': 'token', 'content': event['content']})}\n\n"
+
+                    elif event["type"] == "done":
+                        final_event = event
+
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+
+            if full_answer:
+                history.append({"role": "user", "content": req.question})
+                history.append({"role": "assistant", "content": full_answer})
+                if len(history) > 12:
+                    _chat_histories[req.session_id] = history[-12:]
+                if CACHE_ENABLED:
+                    sources = final_event.get("sources", []) if final_event else []
+                    _cache.put(req.question, full_answer, sources[:5])
+
+            elapsed = int((time.time() - start_time) * 1000)
+            log_interaction(
+                session_id=req.session_id, question=req.question,
+                answer=full_answer,
+                sources=final_event.get("sources", []) if final_event else [],
+                cached=False, response_time_ms=elapsed,
+            )
+
+            if final_event:
+                yield f"data: {json.dumps(final_event)}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'done', 'sources': [], 'images': [], 'related': []})}\n\n"
+
+        return StreamingResponse(agent_stream(), media_type="text/event-stream")
+
+    else:
+        docs = retrieve(_store, req.question) if _store else []
+        sources = [d["source_label"] for d in docs]
+        context = build_context_block(docs)
+        images = search_images(req.question)
+        image_desc = ""
+        if images:
+            parts = [f"- {img['label']} ({img['score']}%): {img['path']}" for img in images]
+            image_desc = "\n".join(parts)
+
+        msgs = build_messages(_system_prompt, history[-12:], req.question, context, image_desc)
+        async def pipeline_stream():
+            full_answer = ""
+            try:
+                for chunk in _llm.stream(msgs):
+                    if await request.is_disconnected():
+                        break
+                    token = chunk.content
+                    if isinstance(token, str) and token:
+                        full_answer += token
+                        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+
+            if full_answer:
+                history.append({"role": "user", "content": req.question})
+                history.append({"role": "assistant", "content": full_answer})
+                if len(history) > 12:
+                    _chat_histories[req.session_id] = history[-12:]
+                if CACHE_ENABLED:
+                    _cache.put(req.question, full_answer, sources[:5])
+
+            elapsed = int((time.time() - start_time) * 1000)
+            log_interaction(
+                session_id=req.session_id, question=req.question,
+                answer=full_answer, sources=sources[:5],
+                cached=False, response_time_ms=elapsed,
+            )
+
+            yield f"data: {json.dumps({'type': 'done', 'sources': sources[:5], 'images': images, 'related': []})}\n\n"
+
+        return StreamingResponse(pipeline_stream(), media_type="text/event-stream")
 
 @app.post("/clear")
 async def clear(session_id: str = "default"):
