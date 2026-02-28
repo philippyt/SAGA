@@ -1,7 +1,7 @@
 # SAGA - subsea autonomous guidance agent
 An agent for subsea pipeline inspection engineers. You can chat with inspection reports, search ROV imagery, classify defects, and look up acceptance criteria from standards like DNV-RP-F116, all in one interface.
 
-Built as a university project exploring how LLMs and vision models can work together for a real engineering problem.
+Currently building as a university project exploring how LLMs and vision models can work together for a real engineering problem.
 
 ## Features
 - Chat with PDF inspection reports using retrieval-augmented generation (RAG)

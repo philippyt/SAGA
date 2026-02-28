@@ -13,6 +13,7 @@ _processor = None
 _index = None
 _classifier = None
 _classifier_classes = None
+_rebuild_progress: dict = {"running": False, "indexed": 0, "total": 0, "done": True, "error": None}
 
 CLIP_SIM_MIN = 0.15
 CLIP_SIM_MAX = 0.40
@@ -288,6 +289,7 @@ def build_clip_index():
         return _index
 
     print(f"   Indexing {len(image_paths)} images")
+    _rebuild_progress["total"] = len(image_paths)
 
     embeddings = []
     valid_paths = []
@@ -306,6 +308,7 @@ def build_clip_index():
             valid_paths.append(img_path)
             dimensions.append((w, h))
             labels.append(_caption_image(model, processor, img))
+            _rebuild_progress["indexed"] = i + 1
 
             if (i + 1) % 50 == 0:
                 print(f"   {i + 1}/{len(image_paths)} images indexed")
@@ -324,7 +327,6 @@ def build_clip_index():
 
     print(f"CLIP index ready: {len(valid_paths)} images")
     return _index
-
 
 def load_clip_index():
     global _index
@@ -384,8 +386,15 @@ def search_images(query: str, k: int = None) -> list[dict]:
     return results
 
 def rebuild_clip_index():
-    global _index
+    global _index, _rebuild_progress
+    _rebuild_progress = {"running": True, "indexed": 0, "total": 0, "done": False, "error": None}
     _index = None
     if Path(CLIP_INDEX_PATH).exists():
         Path(CLIP_INDEX_PATH).unlink()
-    return build_clip_index()
+    try:
+        result = build_clip_index()
+        _rebuild_progress.update({"running": False, "done": True})
+        return result
+    except Exception as e:
+        _rebuild_progress.update({"running": False, "done": True, "error": str(e)})
+        raise

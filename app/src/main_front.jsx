@@ -66,9 +66,9 @@ const SEVERITY_COLORS = {
 const NAV = [
   { key: "agent",          label: "Agent",           mode: "chat" },
   { key: "image_library",  label: "Image Library",   mode: "image" },
-  { key: "defect_analysis",label: "Defect Analysis", soon: true },
-  { key: "standards",      label: "Standards",       soon: true },
-  { key: "reports",        label: "Reports",         soon: true },
+  { key: "defect_analysis",label: "Defect Analysis", soon: true, desc: "Trend analysis across inspection history" },
+  { key: "standards",      label: "Standards",       soon: true, desc: "DNV-RP and NORSOK acceptance criteria" },
+  { key: "reports",        label: "Reports",         soon: true, desc: "Manage and browse ingested reports" },
 ];
 
 const F = '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -339,25 +339,183 @@ function StatusIndicator({ text, theme }) {
   );
 }
 
+/* ── PDF export (client-side, no regex, uses remark AST) ── */
+async function exportPDF(msgs, sessionId) {
+  const jsPDFModule = await import("jspdf");
+  const jsPDF = jsPDFModule.jsPDF || jsPDFModule.default;
+  const { unified } = await import("unified");
+  const { default: remarkParse } = await import("remark-parse");
+
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const M = 20;
+  const W = 210 - M * 2;
+  const BOTTOM = 285;
+  let y = M;
+
+  const checkPage = (needed = 8) => {
+    if (y + needed > BOTTOM) { doc.addPage(); y = M; }
+  };
+
+  const nodeText = (node) => {
+    if (!node) return "";
+    if (node.type === "text" || node.type === "inlineCode") return node.value;
+    if (node.children) return node.children.map(nodeText).join("");
+    return "";
+  };
+
+  const addText = (str, size, rgb, bold = false, indent = 0) => {
+    if (!str?.trim()) return;
+    doc.setFontSize(size);
+    doc.setTextColor(...rgb);
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    const lines = doc.splitTextToSize(str, W - indent);
+    checkPage(lines.length * (size * 0.42) + 2);
+    doc.text(lines, M + indent, y);
+    y += lines.length * (size * 0.42) + 2;
+  };
+
+  const rule = (rgb = [210, 210, 230]) => {
+    checkPage(6); doc.setDrawColor(...rgb); doc.line(M, y, M + W, y); y += 6;
+  };
+
+  const renderNode = (node, indent = 0) => {
+    if (!node) return;
+    switch (node.type) {
+      case "root":
+        node.children?.forEach(c => renderNode(c, indent));
+        break;
+      case "heading": {
+        const sizes = [0, 13, 12, 11, 10];
+        y += 2;
+        addText(nodeText(node), sizes[Math.min(node.depth, 4)], [30, 30, 60], true, indent);
+        break;
+      }
+      case "paragraph":
+        addText(nodeText(node), 10, [40, 40, 70], false, indent);
+        y += 1;
+        break;
+      case "list":
+        node.children?.forEach((item, i) => {
+          const prefix = node.ordered ? `${i + 1}.` : "-";
+          addText(`${prefix}  ${item.children?.map(c => nodeText(c)).join(" ") || ""}`, 10, [40, 40, 70], false, indent + 4);
+        });
+        y += 1;
+        break;
+      case "code": {
+        const codeLines = node.value?.split("\n") || [];
+        const boxH = codeLines.length * 4.2 + 6;
+        checkPage(boxH);
+        doc.setFillColor(240, 240, 248);
+        doc.rect(M + indent, y - 1, W - indent, boxH, "F");
+        doc.setFontSize(8);
+        doc.setFont("courier", "normal");
+        doc.setTextColor(60, 60, 100);
+        codeLines.forEach(cl => {
+          const wrapped = doc.splitTextToSize(cl || " ", W - indent - 4);
+          doc.text(wrapped, M + indent + 3, y + 3);
+          y += wrapped.length * 3.8;
+        });
+        y += 8;
+        break;
+      }
+      case "blockquote":
+        node.children?.forEach(c => renderNode(c, indent + 6));
+        break;
+      case "thematicBreak":
+        rule([210, 210, 230]);
+        break;
+    }
+  };
+
+  const renderMarkdown = (content) => {
+    const tree = unified().use(remarkParse).parse(content);
+    renderNode(tree);
+  };
+
+  // Header
+  doc.setFillColor(99, 102, 241);
+  doc.rect(0, 0, 210, 22, "F");
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(255, 255, 255);
+  doc.text("SAGA", M, 14);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(200, 200, 255);
+  doc.text("Subsea Inspection Report", M + 24, 14);
+  const dateStr = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  doc.text(`${dateStr}  |  ${sessionId}`, 210 - M, 14, { align: "right" });
+  y = 32;
+
+  // Messages
+  let qNum = 0;
+  for (const msg of msgs) {
+    if (msg.role === "user") {
+      qNum++;
+      rule();
+      addText(`Query ${qNum}`, 7.5, [99, 102, 241], true);
+      const content = msg.content?.replace(/\s*\(include relevant inspection images\)/g, "") || "";
+      addText(content, 12, [20, 20, 50], true);
+      y += 3;
+    } else if (msg.role === "assistant") {
+      if (msg.type === "defect_analysis" && msg.result) {
+        const r = msg.result;
+        addText("Defect Analysis", 8, [99, 102, 241], true);
+        addText(`Severity: ${(r.severity || "").toUpperCase()} (${r.severity_prob}%)`, 10, [60, 60, 100], true);
+        r.defects?.slice(0, 3).forEach(d => addText(`${d.type}: ${d.prob}%`, 9, [70, 70, 110], false, 4));
+        if (r.recommendation) addText(`Action: ${r.recommendation}`, 9, [70, 70, 110], false);
+      } else if (msg.content) {
+        addText("Response", 7.5, [99, 102, 241], true);
+        renderMarkdown(msg.content);
+      }
+      if (msg.sources?.length) {
+        y += 2;
+        addText(`Sources: ${msg.sources.join("  |  ")}`, 8, [120, 120, 170], false);
+      }
+      y += 4;
+    }
+  }
+
+  // Footer on every page
+  const total = doc.getNumberOfPages();
+  for (let i = 1; i <= total; i++) {
+    doc.setPage(i);
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(160, 160, 190);
+    doc.text("Always verify critical inspection findings with a qualified engineer.", M, 292);
+    doc.text(`${i} / ${total}`, 210 - M, 292, { align: "right" });
+  }
+
+  doc.save(`saga-${sessionId}.pdf`);
+}
+
 /* ── Sidebar ── */
-function Sidebar({ theme, dark, setDark, mode, switchMode, newChat, imageUploadRef, reportUploadRef, onClearCache }) {
-  const sideBtn = (label, onClick) => (
-    <button onClick={onClick} style={{
+function Sidebar({ theme, dark, setDark, mode, switchMode, newChat, imageUploadRef, reportUploadRef, onClearCache, rebuildState, onRebuild, hasMsgs, onExportPDF }) {
+  const sideBtn = (label, onClick, disabled = false) => (
+    <button onClick={onClick} disabled={disabled} style={{
       display: "flex", alignItems: "center", width: "100%", padding: "7px 10px",
-      border: "none", background: "transparent", color: theme.navText, fontSize: 12,
-      fontFamily: F, cursor: "pointer", textAlign: "left", borderRadius: 5,
-      transition: "all 0.12s",
+      border: "none", background: "transparent",
+      color: disabled ? theme.textSubtle : theme.navText,
+      fontSize: 12, fontFamily: F, cursor: disabled ? "default" : "pointer",
+      textAlign: "left", borderRadius: 5, transition: "all 0.12s",
     }}
-      onMouseEnter={e => { e.currentTarget.style.background = theme.accentDim; e.currentTarget.style.color = theme.text; }}
-      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = theme.navText; }}
+      onMouseEnter={e => { if (!disabled) { e.currentTarget.style.background = theme.accentDim; e.currentTarget.style.color = theme.text; } }}
+      onMouseLeave={e => { if (!disabled) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = theme.navText; } }}
     >{label}</button>
   );
+
+  const rebuildLabel = rebuildState?.running
+    ? `Indexing ${rebuildState.indexed} / ${rebuildState.total || "..."}`
+    : rebuildState?.done && !rebuildState.error
+    ? "Index rebuilt"
+    : "Rebuild image index";
 
   return (
     <div style={{ width: 220, flexShrink: 0, background: theme.sidebar, borderRight: `1px solid ${theme.border}`, display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ padding: "20px 16px 16px", borderBottom: `1px solid ${theme.border}` }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: theme.text, letterSpacing: "0.04em" }}>SAGA</div>
-        <div style={{ fontSize: 11, color: theme.navText, marginTop: 2 }}>Subsea Agent</div>
+        <div style={{ fontSize: 11, color: theme.navText, marginTop: 2 }}>Subsea Intelligence Platform</div>
       </div>
 
       <div style={{ flex: 1, padding: "10px 8px", overflowY: "auto" }}>
@@ -366,19 +524,24 @@ function Sidebar({ theme, dark, setDark, mode, switchMode, newChat, imageUploadR
           const isActive = !item.soon && item.mode === mode;
           return (
             <button key={item.key} onClick={() => { if (!item.soon) switchMode(item.mode); }} style={{
-              display: "flex", alignItems: "center", justifyContent: "space-between",
+              display: "flex", alignItems: "flex-start", justifyContent: "space-between",
               width: "100%", padding: "7px 10px", border: "none", borderRadius: 5,
               background: isActive ? theme.navActive : "transparent",
-              color: isActive ? theme.navActiveText : (item.soon ? theme.textSubtle : theme.navText),
+              color: isActive ? theme.navActiveText : (item.soon ? theme.navText : theme.navText),
               fontSize: 13, fontFamily: F, cursor: item.soon ? "default" : "pointer",
-              textAlign: "left", transition: "all 0.12s",
+              textAlign: "left", transition: "all 0.12s", opacity: item.soon ? 0.5 : 1,
             }}
               onMouseEnter={e => { if (!item.soon && !isActive) { e.currentTarget.style.background = theme.accentDim; e.currentTarget.style.color = theme.text; } }}
               onMouseLeave={e => { if (!item.soon && !isActive) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = theme.navText; } }}
             >
-              <span>{item.label}</span>
+              <div>
+                <div>{item.label}</div>
+                {item.soon && item.desc && (
+                  <div style={{ fontSize: 10, color: theme.navText, marginTop: 2, fontWeight: 400 }}>{item.desc}</div>
+                )}
+              </div>
               {item.soon && (
-                <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: theme.accentDim, color: theme.navText, fontWeight: 600 }}>SOON</span>
+                <span style={{ fontSize: 9, padding: "2px 5px", borderRadius: 3, background: theme.accentDim, color: theme.navText, fontWeight: 600, flexShrink: 0, marginTop: 1 }}>SOON</span>
               )}
             </button>
           );
@@ -389,9 +552,11 @@ function Sidebar({ theme, dark, setDark, mode, switchMode, newChat, imageUploadR
         {sideBtn("New conversation", newChat)}
         {sideBtn("Analyze image", () => imageUploadRef.current?.click())}
         {sideBtn("Upload report", () => reportUploadRef.current?.click())}
+        {hasMsgs && sideBtn("Export PDF", onExportPDF)}
         <div style={{ height: 1, background: theme.border, margin: "4px 2px" }} />
-        {sideBtn(dark ? "Light mode" : "Dark mode", () => setDark(d => !d))}
+        {sideBtn(rebuildLabel, onRebuild, rebuildState?.running)}
         {sideBtn("Clear cache", onClearCache)}
+        {sideBtn(dark ? "Light mode" : "Dark mode", () => setDark(d => !d))}
       </div>
     </div>
   );
@@ -408,12 +573,14 @@ export default function App() {
   const [status, setStatus] = useState(null);
   const [wantImages, setWantImages] = useState(false);
   const [sessionId] = useState(() => `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`);
+  const [rebuildState, setRebuildState] = useState(null);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const abortRef = useRef(null);
   const toolsRef = useRef([]);
   const imageUploadRef = useRef(null);
   const reportUploadRef = useRef(null);
+  const rebuildPollRef = useRef(null);
   const t = dark ? themes.dark : themes.light;
 
   useEffect(() => {
@@ -441,6 +608,27 @@ export default function App() {
     setMode(newMode);
     setMsgs([]);
     setInput("");
+  };
+
+  const startRebuild = async () => {
+    try {
+      const res = await fetch(`${API}/rebuild-index`, { method: "POST" });
+      const data = await res.json();
+      if (data.error) return;
+      setRebuildState({ running: true, indexed: 0, total: 0, done: false, error: null });
+      rebuildPollRef.current = setInterval(async () => {
+        try {
+          const r = await fetch(`${API}/rebuild-progress`);
+          const p = await r.json();
+          setRebuildState(p);
+          if (p.done || !p.running) {
+            clearInterval(rebuildPollRef.current);
+            rebuildPollRef.current = null;
+            setTimeout(() => setRebuildState(null), 3000);
+          }
+        } catch {}
+      }, 1200);
+    } catch {}
   };
 
   const handleImageUpload = async (e) => {
@@ -645,6 +833,9 @@ export default function App() {
         mode={mode} switchMode={switchMode} newChat={newChat}
         imageUploadRef={imageUploadRef} reportUploadRef={reportUploadRef}
         onClearCache={() => { try { fetch(`${API}/clear-cache`); } catch {} }}
+        rebuildState={rebuildState} onRebuild={startRebuild}
+        hasMsgs={msgs.length > 0}
+        onExportPDF={() => exportPDF(msgs, sessionId)}
       />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>

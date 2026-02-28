@@ -3,13 +3,13 @@ import json
 import time
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, UploadFile, File
+from fastapi import FastAPI, Request, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from vectorstore import build_vectorstore
-from clip_index import load_clip_index, search_images, rebuild_clip_index
+from clip_index import load_clip_index, search_images, rebuild_clip_index, _rebuild_progress
 from pipeline import build_llm, load_system_prompt, retrieve, build_context_block, build_messages
 from agent import init_agent, run_agent_turn
 from cache import SemanticCache
@@ -259,10 +259,18 @@ async def clear_cache():
     _cache.clear()
     return {"status": "cache cleared"}
 
-@app.get("/rebuild-index")
-async def rebuild_index():
-    rebuild_clip_index()
-    return {"status": "CLIP index rebuilt"}
+@app.post("/rebuild-index")
+async def rebuild_index(background_tasks: BackgroundTasks):
+    from clip_index import _rebuild_progress
+    if _rebuild_progress.get("running"):
+        return {"error": "Rebuild already in progress"}
+    background_tasks.add_task(rebuild_clip_index)
+    return {"status": "started"}
+
+@app.get("/rebuild-progress")
+def rebuild_progress_endpoint():
+    from clip_index import _rebuild_progress
+    return _rebuild_progress
 
 @app.get("/clear-stats")
 async def clear_stats():
