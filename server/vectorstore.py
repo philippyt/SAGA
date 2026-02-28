@@ -84,6 +84,37 @@ def build_vectorstore() -> Chroma:
     print("Vectors ready")
     return store
 
+def ingest_pdf(store: Chroma, pdf_bytes: bytes, filename: str) -> int:
+    save_path = Path(REPORTS_DIR) / filename
+    save_path.write_bytes(pdf_bytes)
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        separators=["\n\n\n", "\n\n", "\n", ". ", " ", ""],
+        add_start_index=True,
+    )
+
+    try:
+        loader = PyPDFLoader(str(save_path))
+        pages = loader.load()
+    except Exception as e:
+        save_path.unlink(missing_ok=True)
+        raise RuntimeError(f"Could not parse PDF: {e}")
+
+    stem = Path(filename).stem
+    for page in pages:
+        page_num = page.metadata.get("page", 0) + 1
+        page.metadata["source_label"] = f"{stem} s.{page_num}"
+        page.metadata["report"] = stem
+        page.metadata["page_num"] = page_num
+
+    chunks = splitter.split_documents(pages)
+    if chunks:
+        store.add_documents(chunks)
+        print(f"Ingested {len(chunks)} chunks from {filename}")
+    return len(chunks)
+
 def rebuild_vectorstore() -> Chroma:
     import shutil
     if Path(CHROMA_PERSIST_DIR).exists():

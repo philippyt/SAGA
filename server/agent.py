@@ -1,18 +1,11 @@
 from __future__ import annotations
 from pathlib import Path
-import re as _re
 import re
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langchain_core.tools import tool
 from clip_index import search_images as clip_search
-from pipeline import retrieve, build_context_block
-from config import (
-    ANTHROPIC_API_KEY,
-    CLAUDE_MODEL,
-    LLM_TEMPERATURE,
-    PROMPT_FILE,
-)
+from pipeline import retrieve, build_context_block, build_llm
+from config import API_KEY, PROMPT_FILE
 
 _store = None
 _llm_with_tools = None
@@ -33,22 +26,21 @@ def search_reports(query: str) -> str:
 
 @tool
 def search_images(query: str, num_results: int = 8) -> str:
-    """Search the inspection image database using CLIP visual similarity. Use when the user wants images, visual examples, or when visual evidence supports the answer."""
+    """Search the inspection image database using CLIP visual similarity. Use ONLY when the user explicitly asks to see images, photos, or visual examples."""
     results = clip_search(query, k=num_results)
     if not results:
         return "No relevant images found."
     lines = []
     for i, img in enumerate(results):
-        lines.append(f"{i+1}. [{img['score']}%] {img['label']} — path: {img['path']}")
+        lines.append(f"{i+1}. [{img['score']}%] {img['label']} - path: {img['path']}")
     return f"Found {len(results)} images:\n" + "\n".join(lines) + "\n\nReference the most relevant image paths in your answer using [IMAGE: path] tags."
 
 @tool
 def classify_defect(image_path: str) -> str:
     """Classify the type and severity of a defect in an inspection image using CLIP zero-shot classification. Provide an image path from search_images results."""
-    from clip_index import _load_clip
+    from clip_index import classify_image
     from PIL import Image
     from config import IMAGES_DIR
-    import numpy as np
 
     full_path = Path(IMAGES_DIR) / image_path
     if not full_path.exists():
@@ -58,51 +50,15 @@ def classify_defect(image_path: str) -> str:
     if not full_path.exists():
         return f"Image not found: {image_path}"
 
-    model, processor = _load_clip()
     img = Image.open(full_path).convert("RGB")
-
-    defect_types = [
-        "external corrosion on metal surface",
-        "internal corrosion damage",
-        "microbiologically influenced corrosion (MIC)",
-        "coating disbondment and damage",
-        "crack or fracture in weld or base metal",
-        "dent or mechanical impact damage",
-        "marine growth and biofouling",
-        "anode depletion and cathodic protection loss",
-        "pipeline freespan over seabed",
-        "scour and seabed erosion",
-        "no visible defects, clean surface",
-    ]
-
-    inputs = processor(text=defect_types, images=img, return_tensors="pt", padding=True, truncation=True)
-    outputs = model(**inputs)
-    logits = outputs.logits_per_image.detach().numpy().flatten()
-    exp_logits = np.exp(logits - logits.max())
-    probs = exp_logits / exp_logits.sum()
-    ranked = sorted(zip(defect_types, probs), key=lambda x: x[1], reverse=True)
-
-    severity_labels = [
-        "minor surface defect requiring monitoring only",
-        "moderate defect requiring repair within 12 months",
-        "severe defect requiring immediate engineering assessment",
-        "critical defect requiring immediate shutdown and repair",
-    ]
-    sev_inputs = processor(text=severity_labels, images=img, return_tensors="pt", padding=True, truncation=True)
-    sev_outputs = model(**sev_inputs)
-    sev_logits = sev_outputs.logits_per_image.detach().numpy().flatten()
-    sev_exp = np.exp(sev_logits - sev_logits.max())
-    sev_probs = sev_exp / sev_exp.sum()
-    sev_ranked = sorted(zip(severity_labels, sev_probs), key=lambda x: x[1], reverse=True)
+    result = classify_image(img)
 
     report = f"DEFECT ANALYSIS: {image_path}\n\n"
     report += "Defect Classification:\n"
-    for dtype, prob in ranked[:3]:
-        report += f"  {prob*100:.0f}% — {dtype}\n"
-    report += f"\nSeverity Assessment:\n"
-    for sev, prob in sev_ranked[:2]:
-        report += f"  {prob*100:.0f}% — {sev}\n"
-    report += f"\nPrimary finding: {ranked[0][0]}\nEstimated severity: {sev_ranked[0][0]}"
+    for d in result["defects"]:
+        report += f"  {d['prob']}% - {d['type']}\n"
+    report += f"\nSeverity: {result['severity'].upper()} ({result['severity_prob']}%)"
+    report += f"\nRecommendation: {result['recommendation']}"
     return report
 
 @tool
@@ -117,7 +73,6 @@ def check_standard(defect_type: str, standard: str = "DNV-RP-F116") -> str:
     context = build_context_block(docs)
     sources = [d["source_label"] for d in docs]
     return f"Standards reference ({', '.join(sources)}):\n\n{context}"
-
 
 ALL_TOOLS = [search_reports, search_images, classify_defect, check_standard]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
@@ -136,7 +91,7 @@ Tools:
 - classify_defect: Analyze a specific image. Requires image_path from search_images.
 - check_standard: Look up acceptance criteria. Use after identifying a defect.
 
-TOOL CHAINING — chain tools for complex queries:
+TOOL CHAINING - chain tools for complex queries:
 1. "Analyze corrosion" → search_images → classify_defect → check_standard → synthesize
 2. "Acceptance criteria for freespan" → search_reports → check_standard
 3. "Show coating damage" → search_images → describe
@@ -151,6 +106,7 @@ Bad: "External corrosion is visible [IMAGE: corrosion/abc.jpg] on the pipeline s
 Never put IMAGE tags next to commas, periods, or conjunctions.
 
 Keep responses concise (200-300 words). Reference sources. Be direct.
+Use proper markdown formatting: separate sections with blank lines, use **bold** for key terms, and use paragraph breaks between distinct topics. Never write a wall of text.
 """
 
 def init_agent(store, llm_instance=None):
@@ -158,33 +114,26 @@ def init_agent(store, llm_instance=None):
     _store = store
     _system_prompt = _load_agent_prompt()
 
-    if not ANTHROPIC_API_KEY:
-        raise ValueError("ANTHROPIC_API_KEY is not set.")
+    if not API_KEY:
+        raise ValueError("API_KEY is not set in .env")
 
-    base_llm = ChatAnthropic(
-        model=CLAUDE_MODEL,
-        anthropic_api_key=ANTHROPIC_API_KEY,
-        temperature=LLM_TEMPERATURE,
-        max_tokens=2048,
-    )
+    base_llm = build_llm(streaming=False, max_tokens=2048)
     _llm_with_tools = base_llm.bind_tools(ALL_TOOLS)
-
-    _llm_streaming = ChatAnthropic(
-        model=CLAUDE_MODEL,
-        anthropic_api_key=ANTHROPIC_API_KEY,
-        temperature=LLM_TEMPERATURE,
-        max_tokens=1024,
-        streaming=True,
-    )
+    _llm_streaming = build_llm(streaming=True, max_tokens=1024)
     return _llm_with_tools
 
-def run_agent_turn(question: str, history: list[dict] = None, max_iterations: int = 3):
+def run_agent_turn(question: str, history: list[dict] = None, max_iterations: int = 3, use_images: bool = True):
+    """Run the agent loop: tool calls then streamed final answer."""
     if _llm_with_tools is None:
         yield {"type": "token", "content": "Agent not initialized."}
         yield {"type": "done", "sources": [], "images": [], "related": []}
         return
 
-    messages = [SystemMessage(content=_system_prompt)]
+    system_content = _system_prompt
+    if not use_images:
+        system_content += "\n\nIMPORTANT: Do NOT call search_images or classify_defect. Answer using reports and standards only. Do not reference image file names or paths."
+
+    messages = [SystemMessage(content=system_content)]
     if history:
         for h in history[-10:]:
             cls = HumanMessage if h["role"] == "user" else AIMessage
@@ -196,7 +145,8 @@ def run_agent_turn(question: str, history: list[dict] = None, max_iterations: in
     tools_used = False
 
     yield {"type": "thinking", "content": "Planning approach..."}
-    for iteration in range(max_iterations):
+
+    for _ in range(max_iterations):
         response = _llm_with_tools.invoke(messages)
         messages.append(response)
 
@@ -262,7 +212,7 @@ def run_agent_turn(question: str, history: list[dict] = None, max_iterations: in
         messages.append(HumanMessage(
             content="Based on the tool results above, provide a comprehensive answer. "
                     "If exact data isn't available, state what IS available and what further inspection is needed. "
-                    "Never say 'I need to search' - you already searched."
+                    "Never say 'I need to search' as you already searched."
         ))
 
     final_text = ""
@@ -275,6 +225,7 @@ def run_agent_turn(question: str, history: list[dict] = None, max_iterations: in
     except Exception as e:
         final_text = f"Error: {str(e)}"
         yield {"type": "token", "content": final_text}
+
     related = []
     try:
         result = _llm_streaming.invoke([
@@ -291,14 +242,15 @@ def run_agent_turn(question: str, history: list[dict] = None, max_iterations: in
         for l in lines:
             if l.startswith("#") or l.startswith("*") or l.startswith("-"):
                 continue
-            l = _re.sub(r"^\d+[\.\)]\s*", "", l).strip()
-            if _re.search(r'\byou(r|rs)?\b', l, _re.IGNORECASE):
+            l = re.sub(r"^\d+[\.\)]\s*", "", l).strip()
+            if re.search(r'\byou(r|rs)?\b', l, re.IGNORECASE):
                 continue
             if l and len(l) > 5 and l.endswith("?"):
                 clean.append(l)
         related = clean[:3]
     except:
         pass
+
     picked_paths = re.findall(r'\[IMAGE:\s*([^\]]+)\]', final_text)
     picked_images = []
     img_lookup = {img["path"]: img for img in collected_images}
@@ -311,6 +263,7 @@ def run_agent_turn(question: str, history: list[dict] = None, max_iterations: in
 
     if not picked_images and collected_images:
         picked_images = collected_images[:4]
+
     seen = set()
     unique_sources = [s for s in collected_sources if not (s in seen or seen.add(s))]
     seen_paths = set()

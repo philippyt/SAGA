@@ -1,5 +1,8 @@
 fastapi
 uvicorn[standard]
+python-multipart
+langchain-openai
+# langchain-google-genai  # uncomment if using Google Gemini
 python-dotenv
 langchain
 langchain-core

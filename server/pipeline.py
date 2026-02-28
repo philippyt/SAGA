@@ -1,17 +1,19 @@
 from pathlib import Path
-from langchain_anthropic import ChatAnthropic
 from langchain_chroma import Chroma
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from sentence_transformers import CrossEncoder
 from config import (
-    ANTHROPIC_API_KEY,
-    CLAUDE_MODEL,
+    API_KEY,
+    LLM_PROVIDER,
+    LLM_MODEL,
+    LLM_BASE_URL,
     LLM_TEMPERATURE,
     TOP_K,
     RERANK_MODEL,
     RERANK_TOP_K,
     PROMPT_FILE,
 )
+
 _reranker = None
 
 def _get_reranker():
@@ -27,16 +29,48 @@ def load_system_prompt() -> str:
         raise FileNotFoundError(f"Prompt file '{PROMPT_FILE}' not found.")
     return path.read_text(encoding="utf-8")
 
-def build_llm() -> ChatAnthropic:
-    if not ANTHROPIC_API_KEY:
-        raise ValueError("ANTHROPIC_API_KEY is not set.")
-    return ChatAnthropic(
-        model=CLAUDE_MODEL,
-        anthropic_api_key=ANTHROPIC_API_KEY,
-        temperature=LLM_TEMPERATURE,
-        max_tokens=1024,
-        streaming=True,
-    )
+
+def build_llm(streaming: bool = True, max_tokens: int = 1024):
+    if not API_KEY:
+        raise ValueError("API_KEY is not set in .env")
+
+    if LLM_PROVIDER == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+        return ChatAnthropic(
+            model=LLM_MODEL,
+            anthropic_api_key=API_KEY,
+            temperature=LLM_TEMPERATURE,
+            max_tokens=max_tokens,
+            streaming=streaming,
+        )
+
+    elif LLM_PROVIDER == "openai":
+        from langchain_openai import ChatOpenAI
+        kwargs = dict(
+            model=LLM_MODEL,
+            api_key=API_KEY,
+            temperature=LLM_TEMPERATURE,
+            max_tokens=max_tokens,
+            streaming=streaming,
+        )
+        if LLM_BASE_URL:
+            kwargs["base_url"] = LLM_BASE_URL
+        return ChatOpenAI(**kwargs)
+
+    elif LLM_PROVIDER == "google":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        return ChatGoogleGenerativeAI(
+            model=LLM_MODEL,
+            google_api_key=API_KEY,
+            temperature=LLM_TEMPERATURE,
+            max_output_tokens=max_tokens,
+        )
+
+    else:
+        raise ValueError(
+            f"Unknown LLM_PROVIDER: '{LLM_PROVIDER}'. "
+            "Supported values: anthropic, openai, google"
+        )
 
 def retrieve(store: Chroma, query: str, k: int = None, rerank: bool = True):
     k = k or TOP_K

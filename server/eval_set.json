@@ -1,0 +1,44 @@
+[
+  {
+    "id": "freespan_criteria",
+    "question": "What are the acceptance criteria for pipeline freespans according to DNV?",
+    "expected_keywords": ["freespan", "length", "DNV", "criteria", "dynamic", "static"],
+    "notes": "Should reference DNV freespan assessment methodology"
+  },
+  {
+    "id": "external_corrosion",
+    "question": "How is external corrosion on a subsea pipeline assessed and classified?",
+    "expected_keywords": ["corrosion", "wall thickness", "inspection", "external", "cathodic"],
+    "notes": "Should cover inspection methods and classification criteria"
+  },
+  {
+    "id": "coating_inspection",
+    "question": "What inspection methods are used to detect coating disbondment on subsea pipelines?",
+    "expected_keywords": ["coating", "disbondment", "inspection", "visual", "CP"],
+    "notes": "Should mention GVI/CVI and CP readings"
+  },
+  {
+    "id": "anode_replacement",
+    "question": "When should sacrificial anodes be replaced on a subsea structure?",
+    "expected_keywords": ["anode", "cathodic", "depletion", "replacement", "potential"],
+    "notes": "Should reference CP potential thresholds and depletion levels"
+  },
+  {
+    "id": "marine_growth",
+    "question": "What are the fouling levels for marine growth and how do they affect inspection?",
+    "expected_keywords": ["marine growth", "fouling", "level", "inspection", "cleaning"],
+    "notes": "Should reference the 1-5 fouling level scale"
+  },
+  {
+    "id": "weld_defects",
+    "question": "What NDE methods are used to detect weld defects in subsea pipelines?",
+    "expected_keywords": ["weld", "NDE", "ultrasonic", "radiographic", "defect"],
+    "notes": "Should cover common non-destructive examination techniques"
+  },
+  {
+    "id": "cp_readings",
+    "question": "What cathodic protection potential readings indicate adequate pipeline protection?",
+    "expected_keywords": ["cathodic protection", "potential", "mV", "reference electrode", "criterion"],
+    "notes": "Should give specific potential values and reference the relevant standard"
+  }
+]

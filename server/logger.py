@@ -17,6 +17,26 @@ def _get_conn() -> sqlite3.Connection:
             response_time_ms INTEGER
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp REAL NOT NULL,
+            session_id TEXT NOT NULL,
+            question TEXT NOT NULL,
+            rating INTEGER NOT NULL,
+            comment TEXT DEFAULT ''
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            timestamp REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions ON chat_sessions (session_id)")
     conn.commit()
     return conn
 
@@ -31,7 +51,7 @@ def log_interaction(
     try:
         conn = _get_conn()
         conn.execute(
-            """INSERT INTO chat_logs 
+            """INSERT INTO chat_logs
                (timestamp, session_id, question, answer, sources, cached, response_time_ms)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
@@ -47,7 +67,47 @@ def log_interaction(
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"Logging feilet: {e}")
+        print(f"Logging failed: {e}")
+
+def log_feedback(session_id: str, question: str, rating: int, comment: str = ""):
+    try:
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO feedback (timestamp, session_id, question, rating, comment) VALUES (?, ?, ?, ?, ?)",
+            (time.time(), session_id, question, rating, comment),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Feedback logging failed: {e}")
+
+def save_session_turn(session_id: str, role: str, content: str):
+    try:
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO chat_sessions (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+            (session_id, role, content, time.time()),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Session save failed: {e}")
+
+
+def load_session(session_id: str) -> list[dict]:
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT role, content FROM chat_sessions WHERE session_id = ? ORDER BY timestamp ASC",
+            (session_id,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        return [{"role": row[0], "content": row[1]} for row in rows[-24:]]
+    except Exception as e:
+        print(f"Session load failed: {e}")
+        return []
 
 def reset_stats():
     try:
@@ -56,7 +116,7 @@ def reset_stats():
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"Reset feilet: {e}")
+        print(f"Reset failed: {e}")
 
 def get_stats() -> dict:
     try:
@@ -79,13 +139,19 @@ def get_stats() -> dict:
         sessions = cur.fetchone()[0]
 
         cur.execute("""
-            SELECT question, COUNT(*) as cnt 
-            FROM chat_logs 
-            GROUP BY question 
-            ORDER BY cnt DESC 
+            SELECT question, COUNT(*) as cnt
+            FROM chat_logs
+            GROUP BY question
+            ORDER BY cnt DESC
             LIMIT 10
         """)
         top_questions = [{"question": row[0], "count": row[1]} for row in cur.fetchall()]
+
+        cur.execute("SELECT COUNT(*) FROM feedback WHERE rating = 1")
+        thumbs_up = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM feedback WHERE rating = -1")
+        thumbs_down = cur.fetchone()[0]
 
         conn.close()
         return {
@@ -96,6 +162,7 @@ def get_stats() -> dict:
             "avg_cached_ms": round(avg_cached_time),
             "unique_sessions": sessions,
             "top_questions": top_questions,
+            "feedback": {"thumbs_up": thumbs_up, "thumbs_down": thumbs_down},
         }
     except Exception as e:
         return {"error": str(e)}

@@ -16,9 +16,17 @@ CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", 1000))
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", 150))
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 CLIP_MODEL = os.environ.get("CLIP_MODEL", "openai/clip-vit-base-patch32")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+
+# LLM configuration, works with any provider
+# Set API_KEY plus optionally LLM_PROVIDER and LLM_MODEL in your .env
+API_KEY = os.environ.get("API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic") # anthropic | openai | google
+LLM_MODEL = os.environ.get("LLM_MODEL", "claude-haiku-4-5-20251001")
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", None) # optional: OpenAI-compatible endpoint
 LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", 0.3))
+# Backwards-compat aliases (used by a few places that haven't been updated yet)
+ANTHROPIC_API_KEY = API_KEY
+CLAUDE_MODEL = LLM_MODEL
 TOP_K = int(os.environ.get("TOP_K", 5))
 TOP_K_IMAGES = int(os.environ.get("TOP_K_IMAGES", 16))
 RERANK_MODEL = os.environ.get("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
